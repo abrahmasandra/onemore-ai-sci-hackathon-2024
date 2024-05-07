@@ -56,7 +56,7 @@ def convert_nx_to_torch_geometric(graph: nx.Graph):
     
     return data
 
-def convert_all_nx_to_torch_geometric(graphs):
+def convert_all_nx_to_torch_geometric(graphs: list[nx.Graph]):
     """
     Convert a list of NetworkX graphs to a list of PyTorch Geometric Data objects.
     """
@@ -66,14 +66,14 @@ def convert_all_nx_to_torch_geometric(graphs):
         data_list.append(data)
     return data_list
 
-def read_nx_data_from_file(filename):
+def read_nx_data_from_file(filename: str):
     """
     Read a file containing a dictionary of NetworkX graphs.
     """
     graph_data = hp.load_data_from_file(filename)
     return list(graph_data.values())
 
-def read_pyg_data_from_file(filename):
+def read_pyg_data_from_file(filename: str):
     """
     Read a file containing a dictionary of NetworkX graphs and convert them to a list of PyTorch Geometric Data objects.
     """
