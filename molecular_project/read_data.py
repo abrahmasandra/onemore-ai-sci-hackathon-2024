@@ -4,7 +4,9 @@ from torch_geometric.data import Data
 import networkx as nx
 import helper as hp
 
-def convert_nx_to_torch_geometric(graph: nx.Graph):
+NUM_ATOM_TYPES = 118
+
+def convert_nx_to_torch_geometric(graph: nx.Graph, one_hot_enc_atomic_num: bool=False):
     """
     Convert a single NetworkX graph to a PyTorch Geometric Data object.
     """
@@ -15,6 +17,12 @@ def convert_nx_to_torch_geometric(graph: nx.Graph):
     node_labels = []
     node_id_order = []
     for node_id, features_and_labels in node_info.items():
+        if one_hot_enc_atomic_num:
+            atomic_num = features_and_labels['atomic']
+            atomic_num_one_hot = np.zeros(NUM_ATOM_TYPES)
+            atomic_num_one_hot[atomic_num] = 1
+            features_and_labels['atomic'] = atomic_num_one_hot
+
         node_features.append([
             features_and_labels['atomic'],
             features_and_labels['valence'],
