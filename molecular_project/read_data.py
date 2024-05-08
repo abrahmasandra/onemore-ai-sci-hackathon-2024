@@ -3,6 +3,7 @@ import torch
 from torch_geometric.data import Data
 import networkx as nx
 import helper as hp
+import torch.nn.functional as F
 
 NUM_ATOM_TYPES = 118
 
@@ -23,14 +24,22 @@ def convert_nx_to_torch_geometric(graph: nx.Graph, one_hot_enc_atomic_num: bool=
             atomic_num_one_hot[atomic_num] = 1
             features_and_labels['atomic'] = atomic_num_one_hot
 
-        node_features.append([
-            features_and_labels['atomic'],
+        node_feature = []
+
+        if one_hot_enc_atomic_num:
+            node_feature += list(features_and_labels['atomic'])
+        else:
+            node_feature += [features_and_labels['atomic']]
+
+        node_feature.extend([
             features_and_labels['valence'],
             features_and_labels['formal_charge'],
             features_and_labels['aromatic'],
             features_and_labels['hybridization'],
             features_and_labels['radical_electrons'],
         ])
+        node_features.append(node_feature)
+        
         node_labels.append([
             features_and_labels['param']['mass'],
             features_and_labels['param']['charge'],
@@ -40,6 +49,7 @@ def convert_nx_to_torch_geometric(graph: nx.Graph, one_hot_enc_atomic_num: bool=
         node_id_order.append(node_id)
 
     # permute the node features and labels, so that they are in the correct order from the node_id_order
+    # needs to also work for list features (e.g. one-hot encoded atomic number)
     node_features = np.array(node_features)[np.argsort(node_id_order)]
     node_labels = np.array(node_labels)[np.argsort(node_id_order)]
 
@@ -64,13 +74,13 @@ def convert_nx_to_torch_geometric(graph: nx.Graph, one_hot_enc_atomic_num: bool=
     
     return data
 
-def convert_all_nx_to_torch_geometric(graphs: list[nx.Graph]):
+def convert_all_nx_to_torch_geometric(graphs: list[nx.Graph], one_hot_enc_atomic_num: bool=False):
     """
     Convert a list of NetworkX graphs to a list of PyTorch Geometric Data objects.
     """
     data_list = []
     for graph in graphs:
-        data = convert_nx_to_torch_geometric(graph)
+        data = convert_nx_to_torch_geometric(graph, one_hot_enc_atomic_num)
         data_list.append(data)
     return data_list
 
@@ -81,9 +91,9 @@ def read_nx_data_from_file(filename: str):
     graph_data = hp.load_data_from_file(filename)
     return list(graph_data.values())
 
-def read_pyg_data_from_file(filename: str):
+def read_pyg_data_from_file(filename: str, one_hot_enc_atomic_num: bool=False):
     """
     Read a file containing a dictionary of NetworkX graphs and convert them to a list of PyTorch Geometric Data objects.
     """
     graph_dict = hp.load_data_from_file(filename)
-    return convert_all_nx_to_torch_geometric(list(graph_dict.values()))
+    return convert_all_nx_to_torch_geometric(list(graph_dict.values()), one_hot_enc_atomic_num)
