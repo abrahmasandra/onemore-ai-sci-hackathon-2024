@@ -1,63 +1,85 @@
 from torch_geometric.nn import GCNConv
 from torch_geometric.nn import MessagePassing
-from torch_geometric.nn import GATConv
 from torch_geometric.utils import add_self_loops
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
+from torch.nn import Linear, ReLU, Sequential as Seq
+from torch.nn.parameter import Parameter
+from torch_geometric.utils import degree
 
-class AttentionLayer(nn.Module):
-    def __init__(self, in_channels, out_channels, heads=8, dropout=0.0):
-        super().__init__()
-        self.conv = GATConv(in_channels, out_channels, heads=heads, dropout=dropout)
+class GCNConv(MessagePassing):
+    def __init__(self, in_channels, out_channels):
+        super().__init__(aggr='add')  # "Add" aggregation (Step 5).
+        self.lin = Linear(in_channels, out_channels, bias=False)
+        self.bias = Parameter(torch.empty(out_channels))
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.lin.reset_parameters()
+        self.bias.data.zero_()
 
     def forward(self, x, edge_index):
-        return self.conv(x, edge_index)
-    
-class GCNConv(MessagePassing):
-    def __init__(self, in_channels: int, out_channels: int):
-        super().__init__(aggr='add')  # "Add" aggregation (Step 5)
-        self.lin = nn.Linear(in_channels, out_channels)
-
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor):
         # x has shape [N, in_channels]
         # edge_index has shape [2, E]
 
         # Step 1: Add self-loops to the adjacency matrix.
         edge_index, _ = add_self_loops(edge_index, num_nodes=x.size(0))
 
-        # Step 2: Compute the messages.
-        messages = self.propagate(edge_index, size=(x.size(0), x.size(0)), x=x)
+        # Step 2: Linearly transform node feature matrix.
+        x = self.lin(x)
 
-        # Step 3: Update the node embeddings.
-        out = self.lin(messages)
+        # Step 3: Compute normalization.
+        row, col = edge_index
+        deg = degree(col, x.size(0), dtype=x.dtype)
+        deg_inv_sqrt = deg.pow(-0.5)
+        deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+        norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
+
+        # Step 4-5: Start propagating messages.
+        out = self.propagate(edge_index, x=x, norm=norm)
+
+        # Step 6: Apply a final bias vector.
+        out = out + self.bias
 
         return out
 
-    def message(self, x_j: torch.Tensor) -> torch.Tensor:
-        # x_j has shape [E, in_channels]
+    def message(self, x_j, norm):
+        return norm.view(-1, 1) * x_j
 
-        # Step 4: Compute messages.
-        return x_j
+        # return msg
+
+class EdgeConv(MessagePassing):
+    def __init__(self, in_channels, out_channels):
+        super().__init__(aggr='max') #  "Max" aggregation.
+        self.mlp = Seq(Linear(2 * in_channels, out_channels),
+                       ReLU(),
+                       Linear(out_channels, out_channels))
+
+    def forward(self, x, edge_index):
+        return self.propagate(edge_index, x=x)
+
+    def message(self, x_i, x_j):
+        tmp = torch.cat([x_i, x_j - x_i], dim=1)  # tmp has shape [E, 2 * in_channels]
+        return self.mlp(tmp)
     
 class MPNN(nn.Module):
-    def __init__(self, in_channels: int, hidden_channels: int, out_channels: int, num_layers: int=2):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_layers=2):
         super().__init__()
         self.layers = nn.ModuleList()
 
-        # Add the first layer
+        # Add layers for edge convolution and GCNConv
         self.layers.append(GCNConv(in_channels, hidden_channels))
 
-        # Add the intermediate layers
         for _ in range(num_layers - 2):
-            self.layers.append(AttentionLayer(hidden_channels, hidden_channels))
+            self.layers.append(EdgeConv(hidden_channels, hidden_channels))
 
-        # Add the final layer
+        # Add the final message passing layer
         self.layers.append(GCNConv(hidden_channels, out_channels))
 
-    def forward(self, data: Data):
+    def forward(self, data):
         x, edge_index = data.x, data.edge_index
 
         for layer in self.layers:
