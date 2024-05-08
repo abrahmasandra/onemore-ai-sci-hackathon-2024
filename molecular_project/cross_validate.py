@@ -110,10 +110,10 @@ def cv_for_one_config(cfg: dict, loader: Callable, num_folds: int = 5, num_epoch
     # pre-compute the number of features
     num_feat = dataset[0].x.size(1)
 
-    test_loss = []
+    all_loss = []
 
-    # TODO: control this with another verbose?
-    print(f"Starting {num_folds}-fold with config \n {cfg}")
+    if verbose:
+        print(f"Starting {num_folds}-fold with config \n {cfg}")
     for train_idx, test_idx in kf.split(dataset):
         train_dataset = [dataset[i] for i in train_idx]
         test_dataset = [dataset[i] for i in test_idx]
@@ -133,22 +133,38 @@ def cv_for_one_config(cfg: dict, loader: Callable, num_folds: int = 5, num_epoch
         fold_loss = test_mpnn(test_loader, model)
         if verbose:
             print(f"Fold loss: {fold_loss}")
-        test_loss.append(fold_loss)
+        all_loss.append(fold_loss)
     
-    avg_loss = sum(test_loss) / num_folds
-    return test_loss, avg_loss
+    avg_loss = sum(all_loss) / num_folds
+    return all_loss, avg_loss
     
 
 def cross_validation(config: dict, loader: Callable, num_folds: int = 5, num_epochs: int = 100, verbose: bool = False):
     """
     Perform cross-validation on a given configuration
     """
+    results = []
     for cfg in generate_config_combs(config):
-        test_loss, avg_loss = cv_for_one_config(cfg, loader, num_folds, num_epochs, verbose)
-        print(f"Configuration: {cfg}, Loss: {avg_loss}, Test Loss: {test_loss}")
+        all_loss, avg_loss = cv_for_one_config(cfg, loader, num_folds, num_epochs, verbose)
+        if verbose:
+            print(f"All losses: {all_loss}, Average Loss: {avg_loss}")
+        results.append((cfg, avg_loss))
+    return results
+
+
+def rank_cross_validation_results(results: list, top_k: int = 5):
+    """
+    Rank the results of cross-validation
+    """
+    results.sort(key=lambda x: x[1])
+    print(f"Top {top_k} configurations:")
+    for i in range(top_k):
+        print(f"Rank {i+1}: {results[i]}")
+        print("loss: ", results[i][1])
 
 
 if __name__ == '__main__':
     # Example usage:
     loader = get_cv_dataset_loader(one_hot_enc_atomic_num=True)
-    cross_validation(CV_LR_ONLY, loader, num_epochs=20, num_folds=3)
+    results = cross_validation(CV_LR_ONLY, loader, num_epochs=50, num_folds=3, verbose=True)
+    rank_cross_validation_results(results, top_k=2)
