@@ -5,9 +5,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
+from torch.utils.data import random_split
 from torch.nn import Linear, ReLU, Sequential as Seq
 from torch.nn.parameter import Parameter
 from torch_geometric.utils import degree
+from sklearn.model_selection import train_test_split
 
 class GCNConv(MessagePassing):
     def __init__(self, in_channels, out_channels):
@@ -79,12 +81,20 @@ class MPNN(nn.Module):
         # Add the final message passing layer
         self.layers.append(GCNConv(hidden_channels, out_channels))
 
+        # # Add the final linear layer
+        # self.layers.append(Linear(out_channels, out_channels))
+
     def forward(self, data):
         x, edge_index = data.x, data.edge_index
 
-        for layer in self.layers:
+        x = self.layers[0](x, edge_index)
+        x = F.tanh(x)
+
+        for layer in self.layers[1: -1]:
             x = layer(x, edge_index)
-            x = nn.functional.relu(x)
+            x = F.relu(x)
+
+        x = self.layers[-1](x, edge_index)
 
         return x
     
@@ -106,11 +116,19 @@ def train_mpnn(data_loader: DataLoader, model: MPNN, optimizer: torch.optim.Opti
 
     return total_loss / total_samples
 
-def train_loop(data_loader: DataLoader, model: MPNN, optimizer: torch.optim.Optimizer, num_epochs: int = 100, verbose: bool = False):
+def train_loop(data_list: list, model: MPNN, optimizer: torch.optim.Optimizer, num_epochs: int = 100, verbose: bool = False):
+    frac_train = 0.8
     for epoch in range(num_epochs):
-        loss = train_mpnn(data_loader, model, optimizer)
+        # sample data randomly to train, and validate on the rest
+        train_data, val_data = train_test_split(data_list, train_size=frac_train)
+
+        train_data = DataLoader(train_data, batch_size=32)
+        val_data = DataLoader(val_data, batch_size=32)
+
+        train_loss = train_mpnn(train_data, model, optimizer)
         if verbose:
-            print(f'Epoch {epoch}, Loss: {loss}')
+            val_loss = test_mpnn(val_data, model)
+            print(f'Epoch {epoch}, Train Loss: {train_loss}, Val Loss: {val_loss}')
 
 def test_mpnn(data_loader: DataLoader, model: MPNN):
     model.eval()
@@ -119,12 +137,30 @@ def test_mpnn(data_loader: DataLoader, model: MPNN):
     total_samples = 0
 
     for data in data_loader:
-        out = model(data)
-        loss = F.mse_loss(out, data.y)
-        total_loss += loss.item()
-        total_samples += 1
+        with torch.no_grad():
+            out = model(data)
+            loss = F.mse_loss(out, data.y)
+            total_loss += loss.item()
+            total_samples += 1
 
     return total_loss / total_samples
+
+def mpnn_predict(data_loader: DataLoader, model: MPNN):
+    model.eval()
+
+    all_predictions = []
+    all_true_labels = []
+    for data in data_loader:
+        with torch.no_grad():
+            out = model(data)
+        
+        all_predictions.append(out)
+        all_true_labels.append(data.y)
+
+    # Concatenate predictions and true labels from all batches
+    all_predictions = torch.cat(all_predictions, dim=0)
+    all_true_labels = torch.cat(all_true_labels, dim=0)
+    return all_predictions, all_true_labels
 
 def cross_validate(data_loader: DataLoader, model: MPNN, optimizer: torch.optim.Optimizer, num_folds: int = 5, num_epochs: int = 100, verbose: bool = False):
     # in order to optimize the hyperparameters, we will perform a cross-validation
