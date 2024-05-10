@@ -116,14 +116,13 @@ def train_mpnn(data_loader: DataLoader, model: MPNN, optimizer: torch.optim.Opti
 
     return total_loss / total_samples
 
-def train_loop(data_list: list, model: MPNN, optimizer: torch.optim.Optimizer, num_epochs: int = 100, verbose: bool = False):
-    frac_train = 0.8
+def train_loop(data_list: list, model: MPNN, optimizer: torch.optim.Optimizer, num_epochs: int = 100, batch_size=64, frac_train=0.9, verbose: bool = False):
     for epoch in range(num_epochs):
         # sample data randomly to train, and validate on the rest
         train_data, val_data = train_test_split(data_list, train_size=frac_train)
 
-        train_data = DataLoader(train_data, batch_size=32)
-        val_data = DataLoader(val_data, batch_size=32)
+        train_data = DataLoader(train_data, batch_size=batch_size)
+        val_data = DataLoader(val_data, batch_size=batch_size)
 
         train_loss = train_mpnn(train_data, model, optimizer)
         if verbose:
